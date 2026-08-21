@@ -1,0 +1,30 @@
+name: DS Batches Daily Reports
+
+on:
+  schedule:
+    # 01:00 UTC = 06:30 IST. Cron times are always UTC — adjust the hour
+    # here if you want a different local run time.
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+jobs:
+  run-reports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run all reports
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        run: python run_all.py

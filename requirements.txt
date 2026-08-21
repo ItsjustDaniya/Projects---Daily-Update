@@ -1,0 +1,5 @@
+pandas>=2.0
+numpy>=1.24
+gspread>=6.0
+gspread-dataframe>=3.3
+google-auth>=2.28
