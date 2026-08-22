@@ -22,6 +22,11 @@ Usage:
     python eval_turnaround_report.py --date 2024-03-21
     python eval_turnaround_report.py --export out
     python eval_turnaround_report.py --no-push
+
+Auth: this file no longer imports common.sheets_auth.get_client() — it's now
+self-contained via SERVICE_ACCOUNT_JSON (same pattern as the other pipeline
+scripts), so it has no cross-module dependency. This script never touched
+Metabase, so no METABASE_API_KEY is needed here.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -29,6 +34,7 @@ Usage:
 # ─────────────────────────────────────────────────────────────────────────────
 import argparse
 import re
+import json
 from datetime import timezone, timedelta
 
 import pandas as pd
@@ -37,10 +43,51 @@ from gspread_dataframe import set_with_dataframe
 
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.sheets_auth import get_client
+from google.oauth2.service_account import Credentials
 
-gc = get_client()
+# -------------------- ENV & AUTH --------------------
+service_account_json = os.getenv("SERVICE_ACCOUNT_JSON")
+if not service_account_json:
+    raise ValueError("❌ Missing environment variable: SERVICE_ACCOUNT_JSON")
+
+service_info = json.loads(service_account_json)
+creds = Credentials.from_service_account_info(
+    service_info,
+    scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ],
+)
+gc = gspread.authorize(creds)
+
+print("🔎 ENV CHECK")
+print(f"   SA client_email    : {service_info.get('client_email')}")
+
+
+def safe_open_sheet(title):
+    """gc.open() wrapped to fail with an actionable message (the exact
+    service-account email to share the sheet with) instead of a bare
+    SpreadsheetNotFound traceback."""
+    try:
+        return gc.open(title)
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise RuntimeError(
+            f"❌ Could not open Google Sheet '{title}'. Either the title "
+            f"doesn't match exactly, or it hasn't been shared with this "
+            f"service account: {service_info.get('client_email')}. "
+            "Share it as Editor, then re-run."
+        )
+
+
+def safe_open_by_key(key):
+    """Same as safe_open_sheet, but for gc.open_by_key()."""
+    try:
+        return gc.open_by_key(key)
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise RuntimeError(
+            f"❌ Could not open Google Sheet with key '{key}'. Share it with "
+            f"this service account as Editor: {service_info.get('client_email')}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -85,7 +132,7 @@ EXCLUDED_BATCHES = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_from_gsheets() -> pd.DataFrame:
-    spreadsheet = gc.open(SPREADSHEET_NAME_2)
+    spreadsheet = safe_open_sheet(SPREADSHEET_NAME_2)
     worksheet   = spreadsheet.worksheet(MENTOR_SHEET)
     print(f"✓ Connected to '{SPREADSHEET_NAME_2}' → '{MENTOR_SHEET}'")
     records = worksheet.get_all_records(numericise_ignore=["all"])
@@ -625,7 +672,7 @@ def _get_or_create_tab(spreadsheet, tab_name: str):
 
 def push_many(tabs_and_frames) -> None:
     """Write a list of (tab_name, dataframe) pairs to the output spreadsheet."""
-    sheet = gc.open_by_key(OUTPUT_SHEET_KEY)
+    sheet = safe_open_by_key(OUTPUT_SHEET_KEY)
     for tab, data in tabs_and_frames:
         ws = _get_or_create_tab(sheet, tab)
         ws.clear()
