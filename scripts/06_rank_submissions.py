@@ -11,6 +11,11 @@
 #         · dense  ⇒ duplicate/identical submission rows share one rank and the
 #                    sequence stays contiguous (1,2,2,3 … not 1,2,2,4).
 #         · rows with a blank submission_id get a null rank (kept, unranked).
+#
+#  Auth: this file no longer imports common.sheets_auth.get_client() — it's now
+#  self-contained via SERVICE_ACCOUNT_JSON (same pattern as the other pipeline
+#  scripts), so it has no cross-module dependency. This script never touched
+#  Metabase, so no METABASE_API_KEY is needed here.
 # ───── ────────────────────────────────────────────────────────────────────────
 
 # %% ── Config ────────────────────────────────────────────────────────────────
@@ -32,8 +37,58 @@ WRITE_CSV_PATH    = "submissions_ranked.csv"          # also dump a local CSV (s
 
 
 # %% ── Imports ───────────────────────────────────────────────────────────────
+import json
+import os
+
 import numpy as np
 import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
+from gspread_dataframe import set_with_dataframe, get_as_dataframe
+
+# -------------------- ENV & AUTH --------------------
+service_account_json = os.getenv("SERVICE_ACCOUNT_JSON")
+if not service_account_json:
+    raise ValueError("❌ Missing environment variable: SERVICE_ACCOUNT_JSON")
+
+service_info = json.loads(service_account_json)
+creds = Credentials.from_service_account_info(
+    service_info,
+    scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ],
+)
+gc = gspread.authorize(creds)
+
+print("🔎 ENV CHECK")
+print(f"   SA client_email    : {service_info.get('client_email')}")
+
+
+def safe_open_sheet(title):
+    """gc.open() wrapped to fail with an actionable message (the exact
+    service-account email to share the sheet with) instead of a bare
+    SpreadsheetNotFound traceback."""
+    try:
+        return gc.open(title)
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise RuntimeError(
+            f"❌ Could not open Google Sheet '{title}'. Either the title "
+            f"doesn't match exactly, or it hasn't been shared with this "
+            f"service account: {service_info.get('client_email')}. "
+            "Share it as Editor, then re-run."
+        )
+
+
+def safe_open_by_key(key):
+    """Same as safe_open_sheet, but for gc.open_by_key()."""
+    try:
+        return gc.open_by_key(key)
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise RuntimeError(
+            f"❌ Could not open Google Sheet with key '{key}'. Share it with "
+            f"this service account as Editor: {service_info.get('client_email')}"
+        )
 
 
 # %% ── Core transform (pure pandas, no I/O) ──────────────────────────────────
@@ -81,26 +136,14 @@ def rank_submissions(df: pd.DataFrame,
 
 
 # %% ── Google Sheets I/O helpers ─────────────────────────────────────────────
-import os
-import sys
-
-import gspread
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from common.sheets_auth import get_client
-
-gc = get_client()
-
-from gspread_dataframe import set_with_dataframe, get_as_dataframe
-
-
 def read_worksheet(spreadsheet_name: str, worksheet_name: str) -> pd.DataFrame:
-    ws = gc.open(spreadsheet_name).worksheet(worksheet_name)
+    ws = safe_open_sheet(spreadsheet_name).worksheet(worksheet_name)
     df = get_as_dataframe(ws, evaluate_formulas=True, header=0)
     return df.dropna(how="all").dropna(axis=1, how="all")  # trim empty padding
 
 
 def write_worksheet(spreadsheet_key: str, worksheet_name: str, df: pd.DataFrame):
-    sh = gc.open_by_key(spreadsheet_key)
+    sh = safe_open_by_key(spreadsheet_key)
     try:
         ws = sh.worksheet(worksheet_name)
         ws.clear()
