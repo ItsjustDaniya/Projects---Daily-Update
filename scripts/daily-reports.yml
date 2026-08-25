@@ -33,33 +33,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Execute Assignment_Pipeline_Automation.py
+      - name: Execute run_all.py
         env:
-          METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
-          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
-          METABASE_URL: ${{ secrets.METABASE_URL }}
           
-        run: python scripts/placement_grooming.py
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          
+          
+        run: python run_all.py
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
 
-jobs:
-  run-reports:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run all reports
-        env:
-          SERVICE_ACCOUNT_JSON : ${{ secrets.SERVICE_ACCOUNT_JSON }}
-        run: python run_all.py
