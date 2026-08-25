@@ -61,5 +61,5 @@ jobs:
 
       - name: Run all reports
         env:
-          service_account_json : ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          SERVICE_ACCOUNT_JSON : ${{ secrets.SERVICE_ACCOUNT_JSON }}
         run: python run_all.py
