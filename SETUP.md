@@ -79,7 +79,7 @@ Locally:
 
 ```bash
 pip install -r requirements.txt
-export GCP_SERVICE_ACCOUNT_JSON="$(cat /path/to/your-key.json)"
+export SERVICE_ACCOUNT_JSON="$(cat /path/to/your-key.json)"
 python run_all.py
 ```
 
