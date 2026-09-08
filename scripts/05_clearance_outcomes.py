@@ -2,14 +2,11 @@
 Clearance views (Batch × days-since-release buckets)
 ====================================================
 SELF-CONTAINED. Runs on its own — no need for eval_turnaround_report.py.
-
 Day-windows count things BY HOW SOON THEY ARRIVED AFTER PROJECT RELEASE:
     <15 days = within 15 days of project_release_date … cumulative … <75 days
     Total    = everything (so >75-day arrivals & missing release dates → Total only)
-
 TWO tables are produced, each in a LONG (Looker-ready) and WIDE (screenshot-style)
 form:
-
   A) SUBMISSION view  — counts submission rows
        days_x_clearance / days_x_clearance_view
        measures:  # submissions | Evaluations % | Clearance %
@@ -17,7 +14,6 @@ form:
          Evaluations %  evaluated / submissions  (within the window)
          Clearance %    cleared   / submissions  (cleared = evaluated AND
                                                   marks_submission_level ≥ CLEAR_PASS_LEVEL)
-
   B) UNIQUE-USER view — counts DISTINCT users (user_id), by each user's LATEST submission
        users_x_clearance / users_x_clearance_view
        measures:  Users submitted | Users evaluated | Users cleared
@@ -28,34 +24,26 @@ form:
          Users evaluated  …whose LATEST submission is evaluated
          Users cleared    …whose LATEST submission cleared (score ≥ 8)
        (cumulative across windows; Total = all)
-
 ⚠️ Unique-user counts are NOT additive — do not SUM them across batches/dates in
    Looker (a user active in two groups would be double-counted). They're correct
    at the grain of the row group (default: one row per Batch).
-
 Data source: set INPUT_CSV (CSV mode, no auth) or leave None (Google Sheets, needs `gc`).
-
 Auth: this file no longer imports common.sheets_auth.get_client() — it's now
 self-contained via SERVICE_ACCOUNT_JSON (same pattern as the other pipeline
 scripts), so it has no cross-module dependency. This script never touched
 Metabase, so no METABASE_API_KEY is needed here.
 """
-
 from datetime import timezone, timedelta
-
 import json
 import pandas as pd
 import gspread
 from gspread_dataframe import set_with_dataframe
-
 import os
 from google.oauth2.service_account import Credentials
-
 # -------------------- ENV & AUTH --------------------
 service_account_json = os.getenv("SERVICE_ACCOUNT_JSON")
 if not service_account_json:
     raise ValueError("❌ Missing environment variable: SERVICE_ACCOUNT_JSON")
-
 service_info = json.loads(service_account_json)
 creds = Credentials.from_service_account_info(
     service_info,
@@ -65,11 +53,8 @@ creds = Credentials.from_service_account_info(
     ],
 )
 gc = gspread.authorize(creds)
-
 print("🔎 ENV CHECK")
 print(f"   SA client_email    : {service_info.get('client_email')}")
-
-
 def safe_open_sheet(title):
     """gc.open() wrapped to fail with an actionable message (the exact
     service-account email to share the sheet with) instead of a bare
@@ -83,8 +68,6 @@ def safe_open_sheet(title):
             f"service account: {service_info.get('client_email')}. "
             "Share it as Editor, then re-run."
         )
-
-
 def safe_open_by_key(key):
     """Same as safe_open_sheet, but for gc.open_by_key()."""
     try:
@@ -94,27 +77,30 @@ def safe_open_by_key(key):
             f"❌ Could not open Google Sheet with key '{key}'. Share it with "
             f"this service account as Editor: {service_info.get('client_email')}"
         )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 SPREADSHEET_NAME_2 = "calender - 2"
 MENTOR_SHEET       = "Project_evaluations"
 OUTPUT_SHEET_KEY   = "19ecxPlN_MsnO8aVXs4FjJcxu0ShZ1ZtXAXJpZZKttj4"
-
 REPORT_MODULES = [
     "DS 02 Spreadsheets", "DS 04 SQL", "DS 03 Power BI",
     "DS 06 EDA 1", "DS 07 EDA 2",
+    # Added — sourced from technologies_topictemplate (Metabase / Newton School DB):
+    #   id 708 -> "DS 08 ML 1"    (the CURRENT ML1 template; id 209 "DS 08 ML 1 (old)"
+    #                              is a retired/legacy template and should NOT be used)
+    #   id 707 -> "DS 09 ML 2"    (stored in the DB as "DS 09 ML 2 " with a trailing
+    #                              space, but parse_and_clean() strips Module_name,
+    #                              so the stripped form below is what actually matches)
+    #   id 709 -> "DS 09 MLops"
+    "DS 08 ML 1", "DS 09 ML 2", "DS 09 MLops",
 ]
 EXCLUDED_BATCHES = ["Spreadsheets (T)"]
 IST = timezone(timedelta(hours=5, minutes=30))
-
 CLEARANCE_DAY_BUCKETS = [15, 30, 45, 60, 75]   # days since release; cumulative
 CLEAR_PASS_LEVEL      = 8                       # "cleared" = evaluated AND
                                                # marks_submission_level >= this
 DXC_MODULES           = None                   # None ⇒ all REPORT_MODULES
-
 # Row grouping. Default = one row per Batch (matches the screenshot).
 #   add "submission_date" → per-day breakout   |   "submission_month" → per-month
 GROUP_DIMS = ["Module_name", "Batch"]
@@ -122,24 +108,19 @@ _DIM_LABELS = {
     "Module_name": "Module", "Batch": "Batch",
     "submission_date": "Time", "submission_month": "Month",
 }
-
 # Output tabs
 OUTPUT_SHEET_DXC_LONG = "days_x_clearance"
 OUTPUT_SHEET_DXC_WIDE = "days_x_clearance_view"
 OUTPUT_SHEET_USR_LONG = "users_x_clearance"
 OUTPUT_SHEET_USR_WIDE = "users_x_clearance_view"
-
 _BUCKET_LABELS       = ["Total"] + [f"<{d} days" for d in CLEARANCE_DAY_BUCKETS]
 _METRIC_LABELS_SUB   = ["# submissions", "Evaluations %", "Clearance %"]
 _METRIC_LABELS_USERS = ["Users submitted", "Users evaluated", "Users cleared"]
-
 # Resubmission-attempt buckets — a student's cumulative Nth submission per module
 # (rank ≤ N). CUMULATIVE, like the day windows. Edit thresholds freely.
 RESUB_BUCKETS = [1, 2, 3, 5, 10]
 def _resub_label(n): return "1" if n == 1 else f"<{n}"
 OUTPUT_SHEET_RES_LONG = "resub_x_clearance"
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Load (Google Sheets)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,8 +132,6 @@ def load_from_gsheets() -> pd.DataFrame:
     df = pd.DataFrame(records)
     print(f"✓ Fetched {len(df):,} rows  |  {len(df.columns)} columns")
     return df
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Parse & clean
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,17 +140,13 @@ def to_ist_naive(col: pd.Series) -> pd.Series:
     if getattr(dt.dt, "tz", None) is not None:
         dt = dt.dt.tz_convert(IST).dt.tz_localize(None)
     return dt
-
-
 def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = df.columns.str.strip()
     if "user_id" not in df.columns and "User ID" in df.columns:
         df = df.rename(columns={"User ID": "user_id"})
     if "project_release_date" not in df.columns:
         raise KeyError("Expected a 'project_release_date' column for release-based buckets.")
-
     df = df[df["Submission Time"].astype(str).str.strip().ne("")].copy()
-
     df["submission_dt"]          = to_ist_naive(df["Submission Time"])
     df["feedback_dt"]            = to_ist_naive(df["feedback_given_time"])
     df["release_dt"]             = to_ist_naive(df["project_release_date"])
@@ -179,15 +154,12 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     df["submission_month"]       = df["submission_dt"].dt.to_period("M").dt.to_timestamp()
     df["Module_name"]            = df["Module_name"].astype(str).str.strip()
     df["marks_submission_level"] = pd.to_numeric(df["marks_submission_level"], errors="coerce")
-
     df["is_evaluated"] = df["marks_submission_level"].notna() & df["feedback_dt"].notna()
     df["tat_hours"]    = (df["feedback_dt"] - df["submission_dt"]).dt.total_seconds() / 3600
     df["days_from_release"] = (df["submission_dt"] - df["release_dt"]).dt.total_seconds() / 86400
-
     df = df[df["submission_dt"].notna()].copy()
     df = df[df["Module_name"].isin(REPORT_MODULES)].copy()
     df = df[~df["Batch"].astype(str).str.strip().isin(EXCLUDED_BATCHES)].copy()
-
     # Dedup TRUE storage duplicates by submission_id
     before = len(df)
     unevaluated = (df[~df["is_evaluated"]].sort_values("submission_dt")
@@ -196,7 +168,6 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
                    .drop_duplicates(subset=["submission_id"], keep="first"))
     df = pd.concat([unevaluated, evaluated], ignore_index=True).sort_values("submission_dt")
     print(f"  ↳ Removed {before - len(df):,} duplicate rows (by submission_id)")
-
     # Drop superseded un-evaluated submissions per (user_id, Module_name)
     df = df.sort_values(["user_id", "Module_name", "submission_dt"])
     latest_uneval = (df[~df["is_evaluated"]].groupby(["user_id", "Module_name"])["submission_dt"]
@@ -211,32 +182,24 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
          (df["submission_dt"] == df["latest_uneval_dt"]) &
          (df["latest_eval_dt"].isna() | (df["latest_uneval_dt"] > df["latest_eval_dt"])))
     ].drop(columns=["latest_uneval_dt", "latest_eval_dt"]).reset_index(drop=True)
-
     print(f"✓ After cleaning: {len(df):,} rows  |  Modules: {df['Module_name'].unique().tolist()}")
     return df
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Metric helpers
 # ─────────────────────────────────────────────────────────────────────────────
 def _pct(num, den):
     return round(100 * num / den, 1) if den else None
-
-
 def _masks(grp):
     """Common per-row masks used by both blocks."""
     dfr     = grp["days_from_release"]
     ev_mask = grp["is_evaluated"]
     cl_mask = ev_mask & (grp["marks_submission_level"] >= CLEAR_PASS_LEVEL)
     return dfr, ev_mask, cl_mask
-
-
 def _clearance_block(grp: pd.DataFrame) -> dict:
     """SUBMISSION counts: # submissions, Evaluations %, Clearance %."""
     N = len(grp)
     dfr, ev_mask, cl_mask = _masks(grp)
     E, C = int(ev_mask.sum()), int(cl_mask.sum())
-
     out = {
         ("Total", "# submissions"): N,
         ("Total", "Evaluations %"): _pct(E, N),
@@ -252,11 +215,8 @@ def _clearance_block(grp: pd.DataFrame) -> dict:
         out[(lab, "Evaluations %")] = _pct(eval_d, sub_d)
         out[(lab, "Clearance %")]   = _pct(cleared_d, sub_d)
     return out
-
-
 def _user_block(grp: pd.DataFrame) -> dict:
     """DISTINCT-USER counts, based on each user's LATEST submission only.
-
     Each user is first reduced to their single most recent submission
     (by submission_dt) within the group; all three measures and the
     day-since-release windows are then derived from that one row:
@@ -270,7 +230,6 @@ def _user_block(grp: pd.DataFrame) -> dict:
                  .drop_duplicates(subset=["user_id"], keep="last"))
     dfr, ev_mask, cl_mask = _masks(latest)
     n = lambda mask: int(mask.sum())   # one row per user ⇒ row count == user count
-
     out = {
         ("Total", "Users submitted"): int(latest["user_id"].nunique()),
         ("Total", "Users evaluated"): n(ev_mask),
@@ -283,12 +242,8 @@ def _user_block(grp: pd.DataFrame) -> dict:
         out[(lab, "Users evaluated")] = n(within & ev_mask)
         out[(lab, "Users cleared")]   = n(within & cl_mask)
     return out
-
-
 def _dim_value(v):
     return v.date() if hasattr(v, "date") else v
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Generic builders (shared by both tables)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,7 +251,6 @@ def _build_long(df, block_fn, metric_labels, name) -> pd.DataFrame:
     mods = DXC_MODULES or REPORT_MODULES
     d = df[df["Module_name"].isin(mods)].copy()
     pos = {lbl: i for i, lbl in enumerate(_BUCKET_LABELS)}
-
     rows = []
     for keys, grp in d.groupby(GROUP_DIMS):
         keys = keys if isinstance(keys, tuple) else (keys,)
@@ -307,26 +261,21 @@ def _build_long(df, block_fn, metric_labels, name) -> pd.DataFrame:
             for m in metric_labels:
                 row[m] = block[(bucket, m)]
             rows.append(row)
-
     dim_cols = [_DIM_LABELS.get(k, k) for k in GROUP_DIMS]
     report = (pd.DataFrame(rows)
               .sort_values(dim_cols + ["bucket_order"]).reset_index(drop=True))
     print(f"✓ {name} (long): {len(report)} rows ({report[dim_cols].drop_duplicates().shape[0]} groups)")
     return report
-
-
 def _build_wide(df, block_fn, metric_labels, name) -> pd.DataFrame:
     mods = DXC_MODULES or REPORT_MODULES
     d = df[df["Module_name"].isin(mods)].copy()
     dim_cols = [_DIM_LABELS.get(k, k) for k in GROUP_DIMS]
-
     rows = []
     for keys, grp in d.groupby(GROUP_DIMS):
         keys = keys if isinstance(keys, tuple) else (keys,)
         row = {("", _DIM_LABELS.get(k, k)): _dim_value(v) for k, v in zip(GROUP_DIMS, keys)}
         row.update(block_fn(grp))
         rows.append(row)
-
     wide = pd.DataFrame(rows)
     ordered = [("", c) for c in dim_cols]
     for b in _BUCKET_LABELS:
@@ -336,22 +285,15 @@ def _build_wide(df, block_fn, metric_labels, name) -> pd.DataFrame:
     wide = wide.sort_values([("", c) for c in dim_cols]).reset_index(drop=True)
     print(f"✓ {name} (wide): {len(wide)} rows × {len(_BUCKET_LABELS)} windows")
     return wide
-
-
 # Public builders ─────────────────────────────────────────────────────────────
 def build_days_x_clearance_long(df):
     return _build_long(df, _clearance_block, _METRIC_LABELS_SUB, "days_x_clearance")
-
 def build_days_x_clearance_wide(df):
     return _build_wide(df, _clearance_block, _METRIC_LABELS_SUB, "days_x_clearance_view")
-
 def build_users_x_clearance_long(df):
     return _build_long(df, _user_block, _METRIC_LABELS_USERS, "users_x_clearance")
-
 def build_users_x_clearance_wide(df):
     return _build_wide(df, _user_block, _METRIC_LABELS_USERS, "users_x_clearance_view")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # View C — Resubmission × Clearance (per day, batch-wise) → Looker Studio
 # ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +302,6 @@ def build_resub_x_clearance_long(df) -> pd.DataFrame:
     Tidy LONG table for Looker Studio. One row per
         Module × Batch × Time(day) × Resubmission bucket × Clearance window
     with COUNT measures: # submissions | Evaluations # | Clearance #.
-
     • Resubmission bucket = student's cumulative attempt number per module
       (rank ≤ N), computed over the CLEANED rows (all evaluated + each student's
       latest pending), matching the superseded-submission rule in the main report.
@@ -370,7 +311,6 @@ def build_resub_x_clearance_long(df) -> pd.DataFrame:
       auto-subtotals for the two bucket dimensions). Counts DO sum safely across
       Time and Batch.
     • Zero-count cells are dropped to keep the export small.
-
     In Looker Studio: pivot table → row dims Batch, Time, Resubmission bucket
     (sort by resub_order); column dim Clearance window (sort by window_order);
     metrics # submissions / Evaluations # / Clearance #.
@@ -379,12 +319,10 @@ def build_resub_x_clearance_long(df) -> pd.DataFrame:
     d = (df[df["Module_name"].isin(mods)]
          .sort_values(["user_id", "Module_name", "submission_dt"]).copy())
     d["attempt"] = d.groupby(["user_id", "Module_name"]).cumcount() + 1
-
     win = [("Total", None)] + [(f"<{x} days", x) for x in CLEARANCE_DAY_BUCKETS]
     res = [("Total", None)] + [(_resub_label(n), n) for n in RESUB_BUCKETS]
     win_pos = {l: i for i, (l, _) in enumerate(win)}
     res_pos = {l: i for i, (l, _) in enumerate(res)}
-
     rows = []
     for (mod, batch, day), grp in d.groupby(["Module_name", "Batch", "submission_date"]):
         dfr = grp["days_from_release"]
@@ -412,8 +350,6 @@ def build_resub_x_clearance_long(df) -> pd.DataFrame:
               .reset_index(drop=True))
     print(f"✓ resub_x_clearance (long): {len(report)} rows")
     return report
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Push helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -423,22 +359,17 @@ def _get_or_create_tab(spreadsheet, tab_name: str):
     except gspread.WorksheetNotFound:
         print(f"  Creating new tab '{tab_name}' …")
         return spreadsheet.add_worksheet(title=tab_name, rows=5000, cols=40)
-
-
 def push_df(spreadsheet_key: str, tab_name: str, data: pd.DataFrame) -> None:
     sheet = safe_open_by_key(spreadsheet_key)
     ws = _get_or_create_tab(sheet, tab_name)
     ws.clear()
     set_with_dataframe(ws, data, include_index=False, include_column_header=True)
     print(f"  ✓ Written {len(data)} rows to tab '{tab_name}'")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA SOURCE  +  RUN     ← edit these two lines
 # ─────────────────────────────────────────────────────────────────────────────
 INPUT_CSV   = None     # e.g. "query_result_2026-06-19.csv"  (None ⇒ Google Sheets)
 DXC_DO_PUSH = True     # False ⇒ just build & preview (use this when reading a CSV)
-
 if __name__ == "__main__":
     if INPUT_CSV:
         print(f"Reading CSV: {INPUT_CSV}")
@@ -446,7 +377,6 @@ if __name__ == "__main__":
     else:
         raw = load_from_gsheets()
     df = parse_and_clean(raw)
-
     # A) submission view
     dxc_long = build_days_x_clearance_long(df)
     dxc_wide = build_days_x_clearance_wide(df)
@@ -455,7 +385,6 @@ if __name__ == "__main__":
     usr_wide = build_users_x_clearance_wide(df)
     # C) resubmission × clearance, per day, batch-wise (Looker Studio)
     res_long = build_resub_x_clearance_long(df)
-
     with pd.option_context("display.max_columns", None, "display.width", 220):
         print("\n--- Submissions view (wide, head) ---")
         print(dxc_wide.head(6).to_string(index=False))
@@ -463,7 +392,6 @@ if __name__ == "__main__":
         print(usr_wide.head(6).to_string(index=False))
         print("\n--- Resubmission × clearance (long, head) ---")
         print(res_long.head(14).to_string(index=False))
-
     if DXC_DO_PUSH:
         print("\nPushing all tabs to Google Sheets …")
         push_df(OUTPUT_SHEET_KEY, OUTPUT_SHEET_DXC_LONG, dxc_long)
