@@ -80,17 +80,10 @@ REPORT_MODULES = [
     "DS 03 Power BI",
     "DS 06 EDA 1",
     "DS 07 EDA 2",
-    # Added — sourced from technologies_topictemplate (Metabase / Newton School DB):
-    #   id 708 -> "DS 08 ML 1"    (the CURRENT ML1 template; id 209 "DS 08 ML 1 (old)"
-    #                              is a retired/legacy template and should NOT be used)
-    #   id 707 -> "DS 09 ML 2"    (stored in the DB as "DS 09 ML 2 " with a trailing
-    #                              space, but parse_and_clean() already does
-    #                              .str.strip() on Module_name, so the stripped form
-    #                              below is what actually needs to match)
-    #   id 709 -> "DS 09 MLops"
     "DS 08 ML 1",
     "DS 09 ML 2",
     "DS 09 MLops",
+    "DS Deep Learning",   # id 210 — add this
 ]
 OUTPUT_SHEET_KEY    = "1FhjCMl4pQI-yiYNdo64IRZLGkUaNSAqbraENZdT3CAE"
 OUTPUT_SHEET_DAILY  = "daily_summary"
